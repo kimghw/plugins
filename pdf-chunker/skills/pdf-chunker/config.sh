@@ -3,7 +3,7 @@
 # 새 프로젝트에서 사용 시 이 파일의 경로만 수정하면 됩니다.
 
 # 프로젝트 루트 (자동 감지)
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)}"
 
 # 플러그인 루트 (자동 감지)
 PLUGIN_DIR="${CLAUDE_PLUGIN_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"

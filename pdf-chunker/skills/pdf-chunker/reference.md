@@ -19,12 +19,11 @@ plugins/pdf-chunker/
 │           ├── verify_markdown.py # 검증 스크립트
 │           └── queue_manager.sh   # 공유 큐 관리
 ├── hooks/
-│   ├── hooks.json               # 후크 선언
-│   ├── check-failed-tasks.sh    # Stop 후크
-│   └── auto-next-batch.sh       # SubagentStop/UserPromptSubmit 후크
+│   └── hooks.json               # 후크 선언 (현재 비활성)
 └── commands/
-    ├── convert.md       # 변환 커맨드
-    └── next-batch.md            # 배치 실행 커맨드
+    ├── convert.md               # 변환 커맨드
+    ├── setup.md                 # 초기 설정 커맨드
+    └── cowork.md                # 협업 설정 커맨드
 ```
 
 ### 새 프로젝트에서 사용하기
@@ -66,43 +65,8 @@ QUEUE_SCRIPT="$SKILL_DIR/scripts/queue_manager.sh"
 
 ## 후크 설정
 
-### 등록된 후크
-
-플러그인의 `hooks/hooks.json`에서 자동 등록됩니다.
-
-| 이벤트 | 스크립트 | 동작 |
-|--------|----------|------|
-| `Stop` | `check-failed-tasks.sh` | 세션 종료 시 작업 반환 및 현황 보고 |
-| `UserPromptSubmit` | `auto-next-batch.sh` | 사용자 메시지 시 큐 상태 안내 |
-| `SubagentStop` | `auto-next-batch.sh` | 에이전트 완료 시 다음 배치 안내 |
-
-### 자동 연속 실행 흐름
-
-```
-[에이전트 완료]
-    ↓
-[SubagentStop 후크 → auto-next-batch.sh]
-    ↓
-[큐 상태 출력: "ACTION: 다음 작업을 할당받아 실행하세요"]
-    ↓
-[Claude가 queue_manager.sh claim 1 실행]
-    ↓
-[에이전트 실행 → complete/fail 호출]
-```
-
-### 세션 종료 시 (Stop 후크)
-
-```
-[세션 종료]
-    ↓
-[check-failed-tasks.sh]
-    ↓
-[이 인스턴스의 processing/ 작업 확인]
-    ├─ 마크다운 있음 → done/ 이동
-    └─ 마크다운 없음 → pending/ 반환 (다른 인스턴스가 처리 가능)
-    ↓
-[전체 현황 출력]
-```
+현재 후크는 비활성 상태입니다 (`hooks/hooks.json`이 비어있음).
+이전에 사용하던 자동 연속 실행 후크(auto-next-batch, check-failed-tasks)는 제거되었습니다.
 
 ---
 
@@ -174,8 +138,6 @@ cd /path/to/project && claude --plugin-dir ./plugins/pdf-chunker
 # 터미널 B, C, ... (추가 인스턴스)
 cd /path/to/project && claude --plugin-dir ./plugins/pdf-chunker
 # → /pdf-chunker start (init 없이 바로 시작)
-# 또는
-# → /next-batch
 ```
 
 **안전 보장**:
