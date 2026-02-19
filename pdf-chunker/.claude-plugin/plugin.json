@@ -1,0 +1,8 @@
+{
+  "name": "pdf-chunker",
+  "description": "PDF 파일에서 구조화된 청크 JSON을 생성합니다",
+  "version": "3.2.0",
+  "author": {
+    "name": "kimghw"
+  }
+}

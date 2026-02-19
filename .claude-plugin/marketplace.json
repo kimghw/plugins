@@ -1,0 +1,13 @@
+{
+  "name": "kimghw-plugins",
+  "owner": {
+    "name": "kimghw"
+  },
+  "plugins": [
+    {
+      "name": "pdf-chunker",
+      "source": "./pdf-chunker",
+      "description": "PDF 파일에서 구조화된 청크 JSON을 생성하는 플러그인. 디렉토리 기반 공유 큐로 멀티 인스턴스 병렬 처리를 지원합니다."
+    }
+  ]
+}
