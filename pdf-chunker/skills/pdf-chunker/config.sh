@@ -22,6 +22,7 @@ done
 PDF_DIR="${PDF_DIR:-/home/kimghw/kgc/pdf-source/chunks}"
 MD_DIR="${MD_DIR:-/home/kimghw/kgc/pdf-source/output}"  # 청크 JSON 출력 디렉토리 (레거시 변수명 유지)
 IMG_DIR="${IMG_DIR:-$MD_DIR/images}"
+LOG_DIR="${LOG_DIR:-$MD_DIR/.logs}"
 
 # --- 공유 큐 설정 (디렉토리 기반, 절대 경로) ---
 # 여러 구독/계정에서 같은 큐를 공유하기 위해 절대 경로 사용

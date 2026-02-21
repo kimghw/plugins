@@ -15,8 +15,12 @@ source "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/config.sh"
 echo "PDF: $PDF_DIR"
 echo "OUT: $MD_DIR"
 echo "큐: $QUEUE_DIR"
+echo "로그: $LOG_DIR"
 echo "인스턴스: $INSTANCE_ID"
 ```
+
+> **로그 디렉토리**: `$LOG_DIR` (기본값: `$MD_DIR/.logs/`)에 각 에이전트의 전체 작업 로그가 저장됩니다.
+> 로그 파일명 규칙: `[파일명].stage1.log`, `[파일명].stage1_5.log`, `[파일명].stage2.log`
 
 ## 실행 로직 (자동 상태 판단)
 
@@ -145,6 +149,7 @@ PDF 파일에서 구조화된 청크 JSON을 직접 생성하세요.
 PDF: $PDF_DIR/[파일명].pdf
 청크 JSON 저장: $MD_DIR/[파일명].chunks.json
 청크 스키마: $CLAUDE_PLUGIN_DIR/skills/pdf-chunker/chunk-schema.md
+로그 파일: $LOG_DIR/[파일명].stage1.log
 
 작업:
 1. Read로 PDF 읽기
@@ -173,6 +178,10 @@ PDF: $PDF_DIR/[파일명].pdf
 4. Write로 저장: [파일명].chunks.json
 5. 이미지 추출:
    Bash: python3 "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/scripts/extract_images.py" "$PDF_DIR/[파일명].pdf" -o "$IMG_DIR" -v
+6. 로그 저장 — 아래 내용을 로그 파일에 Write로 저장:
+   - 처리 페이지 수, 생성 청크 수, 이미지 수
+   - 발생한 경고/에러 (split 분할, 토큰 초과 등)
+   - 특이사항 (빈 페이지, 인식 불가 영역 등)
 
 결과 보고는 반드시 아래 한 줄 형식으로만 반환하세요:
 GENERATED [파일명] 이미지N개 청크N개
@@ -189,6 +198,7 @@ Stage 1 완료 후, 이미지가 있는 경우에만 실행합니다. `IMAGE_DES
 
 청크 JSON: $MD_DIR/[파일명].chunks.json
 이미지 디렉토리: $IMG_DIR/[파일명]/
+로그 파일: $LOG_DIR/[파일명].stage1_5.log
 
 작업:
 1. chunks.json을 Read로 전체 읽기
@@ -206,6 +216,7 @@ Stage 1 완료 후, 이미지가 있는 경우에만 실행합니다. `IMAGE_DES
    - 구조도/단면도: 부재 명칭과 배치 설명
    - 데이터 테이블 이미지: 포함된 데이터 종류, 주요 수치 설명
 5. 각 청크의 images[].description에 설명을 채워 Write로 저장
+6. 로그 저장 — 처리한 이미지 목록, 각 description 요약을 로그 파일에 Write로 저장
 
 결과 보고는 반드시 아래 한 줄 형식으로만 반환하세요:
 DESCRIBED [파일명] 이미지N개
@@ -223,6 +234,7 @@ Stage 1 (또는 Stage 1.5) 완료 후 별도 에이전트로 실행합니다:
 PDF: $PDF_DIR/[파일명].pdf
 청크 JSON: $MD_DIR/[파일명].chunks.json
 청크 스키마: $CLAUDE_PLUGIN_DIR/skills/pdf-chunker/chunk-schema.md
+로그 파일: $LOG_DIR/[파일명].stage2.log
 
 작업:
 1. 스키마/구조 자동 검증:
@@ -241,6 +253,11 @@ PDF: $PDF_DIR/[파일명].pdf
 5. 수정 불가능한 에러 시:
    Bash: bash "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/scripts/queue_manager.sh" fail "[파일명]" "에러 설명"
    → FAIL 반환
+6. 로그 저장 — 아래 내용을 로그 파일에 Write로 저장:
+   - verify_chunks.py 실행 결과 (에러/경고 목록)
+   - 수정한 항목 목록 (수정 전→후)
+   - 커버리지 확인 결과 (누락 텍스트 유무)
+   - 최종 결과 (OK/FAIL)
 
 결과 보고는 반드시 아래 한 줄 형식으로만 반환하세요:
 OK [파일명] 청크N개
@@ -251,20 +268,22 @@ FAIL [파일명] 에러사유
 ### 에이전트 실행 흐름
 
 각 작업에 대해:
-1. Stage 1 에이전트를 **백그라운드**로 실행
-2. Stage 1 완료 알림 수신 시:
-   - `FAIL`이면 → 해당 작업을 fail 처리하고, 다음 작업 claim
+1. 로그 디렉토리 확인: `mkdir -p "$LOG_DIR"` (첫 작업 시 1회)
+2. Stage 1 에이전트를 **백그라운드**로 실행
+3. Stage 1 완료 알림 수신 시:
+   - `FAIL`이면 → 로그 파일(`$LOG_DIR/[파일명].stage1.log`)을 Read로 읽어 에러 원인 확인 → fail 처리 → 다음 작업 claim
    - `GENERATED`이면:
      - `IMAGE_DESCRIPTION=true`이고 이미지가 있으면 → Stage 1.5 실행
      - 그 외 → Stage 2 실행
-3. Stage 1.5 완료 알림 수신 시:
+4. Stage 1.5 완료 알림 수신 시:
    - → Stage 2 에이전트를 **백그라운드**로 실행
-4. Stage 2 완료 알림 수신 시:
+5. Stage 2 완료 알림 수신 시:
    - `OK`이면 → 다음 작업 claim + Stage 1 실행
-   - `FAIL`이면 → 다음 작업 claim + Stage 1 실행
+   - `FAIL`이면 → 로그 파일(`$LOG_DIR/[파일명].stage2.log`)을 Read로 읽어 에러 원인 확인 → 다음 작업 claim + Stage 1 실행
 
 **중요**: Stage 2 에이전트가 `complete` 또는 `fail`을 호출해야 작업 상태가 즉시 업데이트됩니다.
 Stage 1이 실패하면 코디네이터가 직접 `fail`을 호출합니다.
+로그 파일은 `$LOG_DIR/`에 스테이지별로 저장되며, FAIL 시에만 코디네이터가 로그를 확인합니다.
 
 ---
 
@@ -280,7 +299,7 @@ Stage 1이 실패하면 코디네이터가 직접 `fail`을 호출합니다.
    - "지정한 N개 처리 완료" 메시지 출력
 4. 동시 병렬은 사용자가 선택한 수 유지
 
-**완료 알림 응답 규칙**: 에이전트 완료 알림을 받으면 사용자에게 한 줄로만 보고한다. 예: `0881-0890 OK 16chunks 3img (3/10)`. 전체 배치 완료 시에만 요약 테이블을 출력한다.
+**완료 알림 응답 규칙**: 에이전트 완료 알림을 받으면 사용자에게 한 줄로만 보고한다. 예: `0881-0890 OK 16chunks 3img (3/10)`. FAIL인 경우 로그 파일에서 읽은 에러 원인을 간략히 추가한다. 예: `0881-0890 FAIL (verify: split_total 불일치)`. 전체 배치 완료 시 요약 테이블을 출력하며, FAIL 건이 있으면 로그 경로도 함께 안내한다.
 
 ---
 

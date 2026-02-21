@@ -147,6 +147,10 @@ bash "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/scripts/queue_manager.sh" <command>
 | `status` | 전체 현황 출력 |
 | `migrate` | 레거시 pdf-queue.txt 이전 |
 
+### 컨텍스트 관리
+
+**context 사용량이 80%를 넘어가면 즉시 `/compact`를 실행하여 컨텍스트를 압축한다.** 배치 작업은 대량의 PDF를 반복 처리하므로 컨텍스트 소진이 빠르다. 80% 도달 전에 선제적으로 compact하여 세션 중단을 방지한다.
+
 ### 배치 실행 (2단계 에이전트)
 1. AskUserQuestion으로 다음 두 가지를 물어본다 (하나의 AskUserQuestion에 2개 질문):
    - **동시 실행할 에이전트 수** (옵션: 10개(권장), 5개, 3개)

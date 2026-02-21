@@ -6,10 +6,10 @@ Chunks JSON 검증 스크립트
 2. 구조 검증: chunk_seq 유일성, section_id 그룹 정합성, split 완전성
 3. 파생 필드 일관성: page_start/end ↔ locators.spans 정합성
 4. KG 확장 필드 검증: references[].relation, domain_entities[], applicability 타입 확인
-
-참고: 커버리지(원문 누락 여부)는 이 스크립트에서 검증하지 않습니다.
-청킹이 Claude Read로 수행되므로, 커버리지는 Stage 2 에이전트가
-PDF를 다시 Read로 읽어 직접 확인합니다.
+5. 커버리지 검증: PDF 원문 문장의 마지막 5단어가 chunks.text에 존재하는지 확인
+   - 문장 분리 → 각 문장에서 순수 단어만 추출 → 마지막 5단어 → chunks text에 매칭
+   - 5단어 미만 문장은 skip, 동일 5단어 중복은 1회만 체크
+   - 90%+ 목표
 """
 
 import re
@@ -70,6 +70,22 @@ class StructureError:
 
 
 @dataclass
+class CoverageResult:
+    """커버리지 검증 결과"""
+    total_sentences: int = 0
+    matched_sentences: int = 0
+    skipped_sentences: int = 0  # 5단어 미만 또는 중복으로 skip된 문장
+    unmatched: List[Dict[str, Any]] = field(default_factory=list)  # 매칭 안 된 문장 정보
+
+    @property
+    def coverage_pct(self) -> float:
+        checked = self.total_sentences - self.skipped_sentences
+        if checked == 0:
+            return 100.0
+        return (self.matched_sentences / checked) * 100
+
+
+@dataclass
 class VerificationReport:
     """통합 검증 리포트"""
     json_file: str
@@ -81,6 +97,9 @@ class VerificationReport:
     # 구조 검증
     structure_errors: List[StructureError] = field(default_factory=list)
 
+    # 커버리지 검증
+    coverage: Optional[CoverageResult] = None
+
     @property
     def schema_ok(self) -> bool:
         return not any(e.severity == "error" for e in self.schema_errors)
@@ -90,11 +109,17 @@ class VerificationReport:
         return not any(e.severity == "error" for e in self.structure_errors)
 
     @property
+    def coverage_ok(self) -> bool:
+        if self.coverage is None:
+            return True  # 커버리지 미실행이면 통과
+        return self.coverage.coverage_pct >= 90.0
+
+    @property
     def all_ok(self) -> bool:
-        return self.schema_ok and self.structure_ok
+        return self.schema_ok and self.structure_ok and self.coverage_ok
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "json_file": self.json_file,
             "schema": {
                 "ok": self.schema_ok,
@@ -116,6 +141,17 @@ class VerificationReport:
                 ],
             },
         }
+        if self.coverage is not None:
+            d["coverage"] = {
+                "ok": self.coverage_ok,
+                "total_sentences": self.coverage.total_sentences,
+                "matched": self.coverage.matched_sentences,
+                "skipped": self.coverage.skipped_sentences,
+                "coverage_pct": round(self.coverage.coverage_pct, 1),
+                "unmatched_count": len(self.coverage.unmatched),
+                "unmatched": self.coverage.unmatched[:20],  # 상위 20개만
+            }
+        return d
 
 
 # === 검증 클래스 ===
@@ -486,10 +522,132 @@ class ChunkVerifier:
                     error_type="next_chunk_id_dangling",
                     detail=f"{cid}의 next_chunk_id '{next_id}'가 존재하지 않음"))
 
+    # --- 3. 커버리지 검증 ---
+
+    @staticmethod
+    def _extract_words(text: str) -> List[str]:
+        """텍스트에서 순수 단어만 추출 (특수문자 제거)"""
+        tokens = re.findall(r'[가-힣a-zA-Z0-9]+', text)
+        return tokens
+
+    @staticmethod
+    def _split_sentences(text: str) -> List[str]:
+        """정규식 기반 문장 분리 (기술 문서용)
+
+        마침표/물음표/느낌표 뒤 공백 또는 줄바꿈으로 분리.
+        괄호 안 마침표, 소수점, 조항 번호(101. 등)는 분리하지 않음.
+        """
+        # 줄바꿈을 기준으로 먼저 분리, 그 안에서 문장 종결 부호로 재분리
+        lines = text.split('\n')
+        sentences = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            # 문장 종결: 한글/숫자/닫는괄호 뒤 마침표 + (공백 또는 끝)
+            parts = re.split(r'(?<=[가-힣a-zA-Z0-9\)）\]])\.(?:\s|$)', line)
+            for part in parts:
+                part = part.strip()
+                if part:
+                    sentences.append(part)
+        return sentences
+
+    def verify_coverage(self, pdf_path: Path, data: dict, report: VerificationReport):
+        """PDF 원문 문장의 마지막 5단어가 chunks.text에 존재하는지 검증
+
+        - chunks의 페이지 범위(pdf_page_start~pdf_page_end) 내 PDF 페이지만 검사
+        - 동일 5단어 중복은 한 번만 체크 (페이지 헤더 등 반복 제거)
+        """
+        try:
+            import fitz
+        except ImportError:
+            print("Warning: pymupdf 미설치 — 커버리지 검증 건너뜀")
+            return
+
+        result = CoverageResult()
+
+        # 1. chunks에서 PDF 페이지 범위 추출 (분할 PDF 내 페이지 번호)
+        chunks = data.get("chunks", [])
+        pdf_pages = set()
+        for c in chunks:
+            locators = c.get("locators", {})
+            for span in locators.get("spans", []):
+                ps = span.get("pdf_page_start")
+                pe = span.get("pdf_page_end")
+                if ps is not None and pe is not None:
+                    for p in range(ps, pe + 1):
+                        pdf_pages.add(p)
+
+        # 2. PDF에서 해당 페이지만 텍스트 추출
+        try:
+            doc = fitz.open(str(pdf_path))
+        except Exception as e:
+            print(f"Warning: PDF 열기 실패 — {e}")
+            return
+
+        pdf_text = ""
+        if pdf_pages:
+            for page_num in sorted(pdf_pages):
+                idx = page_num - 1  # fitz는 0-indexed
+                if 0 <= idx < len(doc):
+                    pdf_text += doc[idx].get_text() + "\n"
+        else:
+            # 페이지 정보가 없으면 전체 추출
+            for page in doc:
+                pdf_text += page.get_text() + "\n"
+        doc.close()
+
+        if not pdf_text.strip():
+            print("Warning: PDF에서 텍스트를 추출할 수 없음")
+            return
+
+        # 3. 문장 분리
+        sentences = self._split_sentences(pdf_text)
+        result.total_sentences = len(sentences)
+
+        # 4. chunks의 전체 text + section_path를 합침 (공백 제거하여 연속 문자열로)
+        all_text_parts = []
+        for c in chunks:
+            all_text_parts.append(c.get("text", ""))
+            # section_path도 포함 — 절/장 제목이 여기에 있으므로
+            for sp in c.get("section_path", []):
+                all_text_parts.append(sp)
+        all_chunks_text_raw = " ".join(all_text_parts)
+        all_chunks_words = self._extract_words(all_chunks_text_raw)
+        all_chunks_joined = "".join(all_chunks_words)
+
+        # 5. 각 문장에서 마지막 5단어 추출 → 중복 제거 후 검색
+        seen_keys = set()
+        for sent in sentences:
+            words = self._extract_words(sent)
+            if len(words) < 5:
+                result.skipped_sentences += 1
+                continue
+
+            last5_words = words[-5:]
+            last5_joined = "".join(last5_words)
+            last5_display = " ".join(last5_words)
+
+            # 동일 5단어는 한 번만 체크
+            if last5_joined in seen_keys:
+                result.skipped_sentences += 1
+                continue
+            seen_keys.add(last5_joined)
+
+            if last5_joined in all_chunks_joined:
+                result.matched_sentences += 1
+            else:
+                result.unmatched.append({
+                    "sentence": sent.strip()[:100],
+                    "last5": last5_display,
+                })
+
+        report.coverage = result
+
     # --- 통합 검증 ---
 
-    def verify(self, json_path: Path) -> Optional[VerificationReport]:
-        """chunks.json 스키마 + 구조 검증"""
+    def verify(self, json_path: Path, pdf_path: Path = None) -> Optional[VerificationReport]:
+        """chunks.json 스키마 + 구조 + 커버리지 검증"""
         report = VerificationReport(
             json_file=str(json_path.name),
         )
@@ -504,6 +662,10 @@ class ChunkVerifier:
 
         # 2. 구조 검증
         self.verify_structure(data, report)
+
+        # 3. 커버리지 검증 (PDF 경로가 있을 때만)
+        if pdf_path is not None:
+            self.verify_coverage(pdf_path, data, report)
 
         return report
 
@@ -534,6 +696,22 @@ class ChunkVerifier:
                 icon = "!!" if e.severity == "error" else "W "
                 print(f"  {icon} {e.error_type}: {e.detail}")
 
+        # 커버리지
+        if report.coverage is not None:
+            cov = report.coverage
+            cov_status = "OK" if report.coverage_ok else "FAIL"
+            checked = cov.total_sentences - cov.skipped_sentences
+            print(f"[커버리지] {cov_status} — {cov.coverage_pct:.1f}% "
+                  f"(매칭 {cov.matched_sentences}/{checked}, "
+                  f"skip {cov.skipped_sentences}, 총 문장 {cov.total_sentences})")
+
+            if verbose and cov.unmatched:
+                shown = cov.unmatched[:20]
+                for u in shown:
+                    print(f"  !! 미매칭: \"{u['last5']}\" ← {u['sentence']}")
+                if len(cov.unmatched) > 20:
+                    print(f"  ... 외 {len(cov.unmatched) - 20}건")
+
         # 종합
         overall = "PASS" if report.all_ok else "FAIL"
         print(f"\n종합: {overall}")
@@ -541,28 +719,34 @@ class ChunkVerifier:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='chunks.json 스키마/구조 검증 (커버리지는 Stage 2 에이전트가 수행)',
+        description='chunks.json 스키마/구조/커버리지 검증',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 예시:
-  # chunks.json 검증
+  # 스키마+구조만 검증 (PDF 없이)
   python verify_chunks.py output.chunks.json -v
 
+  # 스키마+구조+커버리지 검증 (PDF 필요)
+  python verify_chunks.py output.chunks.json --pdf input.pdf -v
+
   # JSON으로 결과 저장
-  python verify_chunks.py output.chunks.json --export report.json
+  python verify_chunks.py output.chunks.json --pdf input.pdf --export report.json
         """
     )
 
     parser.add_argument('json_path', help='검증할 chunks.json 파일 경로')
+    parser.add_argument('--pdf', metavar='FILE', help='커버리지 검증용 원본 PDF 경로')
     parser.add_argument('-v', '--verbose', action='store_true', help='상세 출력')
     parser.add_argument('--export', metavar='FILE', help='검증 결과를 JSON 파일로 저장')
+    parser.add_argument('--unmatched-log', metavar='FILE', help='미매칭 목록을 별도 로그 파일로 저장')
 
     args = parser.parse_args()
 
     verifier = ChunkVerifier()
     json_path = Path(args.json_path)
+    pdf_path = Path(args.pdf) if args.pdf else None
 
-    report = verifier.verify(json_path)
+    report = verifier.verify(json_path, pdf_path=pdf_path)
     if report is None:
         sys.exit(1)
     verifier.print_report(report, verbose=args.verbose)
@@ -571,6 +755,25 @@ def main():
         with open(args.export, 'w', encoding='utf-8') as f:
             json.dump(report.to_dict(), f, ensure_ascii=False, indent=2)
         print(f"\n검증 결과 저장: {args.export}")
+
+    # 미매칭 로그: --unmatched-log 지정 시 해당 경로, 아니면 output/unmatched_logs/에 자동 생성
+    if report.coverage and report.coverage.unmatched:
+        if args.unmatched_log:
+            log_path = Path(args.unmatched_log)
+        else:
+            log_dir = json_path.parent / "unmatched_logs"
+            log_dir.mkdir(exist_ok=True)
+            log_path = log_dir / json_path.with_suffix('.unmatched.log').name
+        cov = report.coverage
+        checked = cov.total_sentences - cov.skipped_sentences
+        with open(log_path, 'w', encoding='utf-8') as f:
+            f.write(f"커버리지: {cov.coverage_pct:.1f}% "
+                    f"(매칭 {cov.matched_sentences}/{checked}, "
+                    f"미매칭 {len(cov.unmatched)}건)\n")
+            f.write(f"{'='*60}\n")
+            for u in cov.unmatched:
+                f.write(f"[{u['last5']}] ← {u['sentence']}\n")
+        print(f"미매칭 로그 저장: {log_path}")
 
     # 종료 코드
     if not report.all_ok:
