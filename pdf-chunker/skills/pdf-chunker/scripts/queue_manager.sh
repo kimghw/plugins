@@ -35,6 +35,14 @@ now_epoch() {
     date +%s
 }
 
+# ISO 8601 날짜를 epoch 초로 변환 (GNU + BSD 호환)
+iso_to_epoch() {
+    local iso="$1"
+    date -d "$iso" +%s 2>/dev/null || \
+    date -j -f "%Y-%m-%dT%H:%M:%SZ" "$iso" +%s 2>/dev/null || \
+    echo 0
+}
+
 ensure_dirs() {
     mkdir -p "$QUEUE_PENDING" "$QUEUE_PROCESSING" "$QUEUE_DONE" "$QUEUE_FAILED"
 }
@@ -252,6 +260,13 @@ cmd_migrate() {
 
 cmd_claim() {
     local count="${1:-1}"
+
+    # 정수 검증
+    if ! [[ "$count" =~ ^[0-9]+$ ]] || [ "$count" -eq 0 ]; then
+        echo "ERROR: claim 개수는 양의 정수여야 합니다: '$count'"
+        return 1
+    fi
+
     local claimed=0
     local claimed_list=""
 
@@ -439,7 +454,7 @@ _do_recover() {
 
         if [ -n "$lease_expires" ]; then
             local lease_epoch
-            lease_epoch=$(date -d "$lease_expires" +%s 2>/dev/null || echo 0)
+            lease_epoch=$(iso_to_epoch "$lease_expires")
             if [ "$now" -gt "$lease_epoch" ] && [ "$lease_epoch" -gt 0 ]; then
                 is_stale=1
                 [ "$verbose" -eq 1 ] && echo "RECOVERED (lease 만료): $basename"
@@ -449,7 +464,7 @@ _do_recover() {
         # lease가 없으면 기존 claimed_at + STALE_THRESHOLD fallback
         if [ "$is_stale" -eq 0 ] && [ -z "$lease_expires" ]; then
             local claimed_epoch
-            claimed_epoch=$(date -d "$claimed_at" +%s 2>/dev/null || echo 0)
+            claimed_epoch=$(iso_to_epoch "$claimed_at")
             local age=$((now - claimed_epoch))
             if [ "$age" -gt "$STALE_THRESHOLD" ]; then
                 is_stale=1
@@ -469,6 +484,38 @@ _do_recover() {
 
     if [ "$verbose" -eq 1 ]; then
         echo "복구됨: ${recovered}개"
+    fi
+}
+
+cmd_reset() {
+    local all_flag="${1:-}"
+    local count=0
+
+    for taskfile in "$QUEUE_PROCESSING"/*.task; do
+        [ -f "$taskfile" ] || continue
+
+        # --all이 아니면 내 세션 것만
+        if [ "$all_flag" != "--all" ]; then
+            local owner
+            owner=$(read_task_field "$taskfile" "claimed_by")
+            [ "$owner" != "$INSTANCE_ID" ] && continue
+        fi
+
+        local taskname
+        taskname=$(basename "$taskfile")
+
+        update_task_field "$taskfile" "claimed_by" ""
+        update_task_field "$taskfile" "claimed_at" ""
+        update_task_field "$taskfile" "lease_expires_at" ""
+        update_task_field "$taskfile" "heartbeat_at" ""
+        mv "$taskfile" "$QUEUE_PENDING/$taskname"
+        count=$((count + 1))
+    done
+
+    if [ "$count" -eq 0 ]; then
+        echo "processing 작업 없음"
+    else
+        echo "RESET: ${count}개를 pending으로 되돌림"
     fi
 }
 
@@ -549,12 +596,15 @@ cmd_list() {
 
 # --- 디스패치 ---
 
-# --force 옵션 파싱
+# --force / --all 옵션 파싱
 FORCE=""
+ALL=""
 ARGS=()
 for arg in "$@"; do
     if [ "$arg" = "--force" ]; then
         FORCE="--force"
+    elif [ "$arg" = "--all" ]; then
+        ALL="--all"
     else
         ARGS+=("$arg")
     fi
@@ -570,10 +620,11 @@ case "$COMMAND" in
     release)   cmd_release "${1:-}" "$FORCE" ;;
     heartbeat) cmd_heartbeat "${1:-}" ;;
     recover)   cmd_recover ;;
+    reset)     cmd_reset "$ALL" ;;
     status)    cmd_status ;;
     list)      cmd_list "$@" ;;
     *)
-        echo "사용법: queue_manager.sh <init|migrate|claim|complete|fail|release|heartbeat|recover|status|list>"
+        echo "사용법: queue_manager.sh <init|migrate|claim|complete|fail|release|heartbeat|recover|reset|status|list>"
         exit 1
         ;;
 esac

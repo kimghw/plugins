@@ -149,6 +149,13 @@ def extract_images_from_pdf(pdf_path, output_dir, dpi=300, min_area=5000,
                 filename = f"{basename}_p{page_num + 1:02d}_{gi + 1:02d}.png"
 
             filepath = os.path.join(task_output_dir, filename)
+            # 파일명 충돌 방지: 동일 파일명이 존재하면 _2, _3 ... suffix 추가
+            if os.path.exists(filepath):
+                name_stem, name_ext = os.path.splitext(filename)
+                counter = 2
+                while os.path.exists(filepath):
+                    filepath = os.path.join(task_output_dir, f"{name_stem}_{counter}{name_ext}")
+                    counter += 1
             pix.save(filepath)
             extracted.append(filepath)
 

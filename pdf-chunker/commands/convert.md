@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash, Read, Write, Edit, Task, Glob, Grep, WebFetch, WebSearch
+allowed-tools: Bash, Read, Write, Edit, Task, Glob, Grep, WebFetch, WebSearch, mcp__codex-agent__codex, mcp__codex-agent__codex-reply, mcp__gemini__ask-gemini
 ---
 
 # PDF → 청크 JSON 변환 시스템 (공유 큐)
@@ -9,7 +9,7 @@ PDF 파일들을 구조화된 청크 JSON으로 변환하는 통합 커맨드입
 
 ## 경로 설정
 
-모든 경로는 `$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/config.sh`에서 관리합니다.
+경로는 `.claude/pdf-queue.env`에 정의되며, `config.sh`가 이를 로드하고 파생 변수를 설정합니다.
 ```bash
 source "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/config.sh"
 echo "PDF: $PDF_DIR"
@@ -20,11 +20,11 @@ echo "인스턴스: $INSTANCE_ID"
 ```
 
 > **로그 디렉토리**: `$LOG_DIR` (기본값: `$MD_DIR/.logs/`)에 각 에이전트의 전체 작업 로그가 저장됩니다.
-> 로그 파일명 규칙: `[파일명].stage1.log`, `[파일명].stage1_5.log`, `[파일명].stage2.log`
+> 로그 파일명 규칙: `[파일명].log`
 
 ## 실행 로직 (자동 상태 판단)
 
-`$ARGUMENTS`가 `init`, `start`, `status`, `recover`, `migrate` 중 하나이면 해당 명령을 직접 실행한다.
+`$ARGUMENTS`가 `init`, `start`, `status`, `recover`, `reset`, `migrate` 중 하나이면 해당 명령을 직접 실행한다.
 
 **`$ARGUMENTS`가 비어있거나 위 명령이 아닌 경우**, 아래 자동 판단 로직을 실행한다:
 
@@ -67,7 +67,7 @@ bash "$QUEUE_SCRIPT" init
 
 **1단계: 사용자에게 처리 방식 확인**
 
-먼저 현재 큐 상태를 보여주고, AskUserQuestion으로 다음 세 가지를 **하나의 AskUserQuestion에 3개 질문**으로 물어본다:
+먼저 현재 큐 상태를 보여주고, AskUserQuestion으로 다음 세 가지를 **하나의 AskUserQuestion에 4개 질문**으로 물어본다:
 
 ```bash
 source "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/config.sh"
@@ -87,6 +87,19 @@ bash "$QUEUE_SCRIPT" status
 - header: "이미지 분석"
 - options: 끄기(권장), 켜기
 - 켜면 `IMAGE_DESCRIPTION=true` 설정 → Stage 1.5 실행
+
+질문 4 — **검증 모델 (Stage 2)**
+- header: "검증 모델"
+- options: Codex gpt-5.3-codex(권장), Gemini gemini-3-pro-preview, 끄기(Stage 2 스킵)
+- 선택값을 `REVIEW_MODEL` 변수로 설정 (codex / gemini / off)
+
+**1.5단계: MCP 사전 체크** (REVIEW_MODEL이 off가 아닐 때)
+
+```bash
+bash "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/scripts/setup_mcp.sh" --check-only "$REVIEW_MODEL"
+```
+
+실패(exit 1) 시 → "MCP 설정이 필요합니다. `/pdf-chunker:setup`을 먼저 실행하세요." 안내 후 중단.
 
 **2단계: 작업 할당**
 
@@ -128,6 +141,17 @@ source "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/config.sh"
 bash "$QUEUE_SCRIPT" recover
 ```
 
+### reset 명령
+
+processing에 있는 작업을 조건 판단 없이 pending으로 되돌린다.
+기본은 현재 세션의 작업만, `--all`이면 전체.
+
+```bash
+source "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/config.sh"
+bash "$QUEUE_SCRIPT" reset         # 내 세션 것만
+bash "$QUEUE_SCRIPT" reset --all   # 전체 (다른 세션 포함)
+```
+
 ### migrate 명령
 
 ```bash
@@ -137,153 +161,46 @@ bash "$QUEUE_SCRIPT" migrate
 
 ---
 
-## 에이전트 프롬프트 템플릿
+## 에이전트 프롬프트
 
-각 작업은 **2단계 에이전트**로 실행합니다. 컨텍스트 손실을 방지하기 위해 생성과 검증을 분리합니다.
+각 작업은 **서브 에이전트 1개**가 Stage 1→2→3 전 과정을 처리합니다.
+프롬프트는 `$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/prompts/` 디렉토리에 분리되어 있습니다.
 
-### Stage 1: 생성 에이전트
+### Task prompt 템플릿
 
-```
-PDF 파일에서 구조화된 청크 JSON을 직접 생성하세요.
-
-PDF: $PDF_DIR/[파일명].pdf
-청크 JSON 저장: $MD_DIR/[파일명].chunks.json
-청크 스키마: $CLAUDE_PLUGIN_DIR/skills/pdf-chunker/chunk-schema.md
-로그 파일: $LOG_DIR/[파일명].stage1.log
-
-작업:
-1. Read로 PDF 읽기
-2. 청크 스키마(chunk-schema.md)를 Read로 읽기
-3. 청크 JSON 직접 생성 (chunk-schema.md v0.7):
-   - ### 최하위 헤딩 단위로 청킹, 각 청크에 section_id 부여
-   - 섹션 도입부(공통 정의/적용조건)는 chunk_type: "intro"로 분리
-   - 500토큰 초과 시 **(1)**/(가) 경계에서 분할, split.group_id 부여 ({section_id}|{parent_label})
-   - 50토큰 미만은 chunk_type: "micro", 표는 통째 chunk_type: "table"
-   - 2000토큰 초과 표는 table_oversized: true
-   - 각 청크에: section_id, section_path, context_prefix, images[], tables[], references[], keywords(5개)
-   - images[].description: 빈 문자열 ""로 설정 (Stage 1.5에서 채움)
-   - references에 target_norm (정규화 구조) 포함. null 키 금지 — 해당 키만 포함. external이면 빈 객체 {}
-   - references에 relation 필드 추가: 초기값 null (후처리에서 채움)
-   - text에는 본문만 (헤더 반복 금지), 원문 그대로 — 요약/생략 금지
-   - text 내 표는 마크다운 표 문법, 용어는 **볼드** 유지
-   - section_index(섹션 등장 순번) + chunk_seq(문서 전체 유일 순번) 모두 기입
-   - page_start/end는 locators.spans에서 파생: page_start=min(doc_page_start), page_end=max(doc_page_end)
-   - locators.spans에 pdf_page_start/end(분할 PDF 내) + doc_page_start/end(전체 문서 절대 페이지) 기록
-   - prev_chunk_id / next_chunk_id로 순차 연결 (첫 청크 prev=null, 마지막 next=null)
-   - 숫자 테이블(계산표/허용값표)은 tables_data에 구조화 (columns, rows). 없으면 빈 객체 {}
-   - 수식/기호 정의는 equations 배열에 적극 구조화 (name, symbol, expression, variables). 없으면 빈 배열 []
-   - embedding 필드 없음 (별도 컬렉션으로 분리)
-   - KG 확장 필드(domain_entities, applicability, normative_values)는 청킹 시 생성하지 않음 (후처리에서 채움)
-   - null 사용 금지: tables_data는 {}, equations는 [], images/tables/references는 [] 사용
-4. Write로 저장: [파일명].chunks.json
-5. 이미지 추출:
-   Bash: python3 "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/scripts/extract_images.py" "$PDF_DIR/[파일명].pdf" -o "$IMG_DIR" -v
-6. 로그 저장 — 아래 내용을 로그 파일에 Write로 저장:
-   - 처리 페이지 수, 생성 청크 수, 이미지 수
-   - 발생한 경고/에러 (split 분할, 토큰 초과 등)
-   - 특이사항 (빈 페이지, 인식 불가 영역 등)
-
-결과 보고는 반드시 아래 한 줄 형식으로만 반환하세요:
-GENERATED [파일명] 이미지N개 청크N개
-또는
-FAIL [파일명] 에러사유
-```
-
-### Stage 1.5: 이미지 분석 에이전트 (옵션)
-
-Stage 1 완료 후, 이미지가 있는 경우에만 실행합니다. `IMAGE_DESCRIPTION` 옵션이 켜져 있을 때만 실행됩니다.
+각 작업에 대해 Task 도구를 호출할 때 아래 내용을 prompt로 전달합니다:
 
 ```
-추출된 이미지의 내용을 분석하여 chunks.json의 images[].description을 채우세요.
+PDF 파일 '[파일명].pdf'을 청크 JSON으로 변환하세요.
 
-청크 JSON: $MD_DIR/[파일명].chunks.json
-이미지 디렉토리: $IMG_DIR/[파일명]/
-로그 파일: $LOG_DIR/[파일명].stage1_5.log
+설정값:
+- PLUGIN_DIR: $CLAUDE_PLUGIN_DIR
+- PDF_DIR: $PDF_DIR
+- MD_DIR: $MD_DIR
+- IMG_DIR: $IMG_DIR
+- LOG_DIR: $LOG_DIR
+- PDF_FILE: [파일명].pdf
+- REVIEW_MODEL: $REVIEW_MODEL
+- IMAGE_DESCRIPTION: $IMAGE_DESCRIPTION
 
-작업:
-1. chunks.json을 Read로 전체 읽기
-2. images[]가 비어있지 않은 청크를 찾기
-3. 각 이미지에 대해 **문맥 수집 후 분석**:
-   a. 해당 청크의 text를 읽기 (이미지가 어떤 맥락에서 참조되는지 확인)
-   b. prev_chunk_id / next_chunk_id로 인접 청크의 text도 읽기 (수치, 용어, 조건 등 보충 정보)
-   c. 이미지 파일을 Read로 읽기
-   d. 이미지 내용 + 청크 문맥을 종합하여 description 작성 (1~3문장)
-4. description 작성 기준:
-   - 플로우차트: 흐름, 판단 조건, 분기 결과 요약
-   - 도해/다이어그램: 구조, 부호 규약, 방향 설명
-   - 그래프: 축 의미, 곡선 종류, 허용값/경계값 수치 포함
-   - 배치도: 구획/탱크 명칭, Frame 범위, 용도 구분
-   - 구조도/단면도: 부재 명칭과 배치 설명
-   - 데이터 테이블 이미지: 포함된 데이터 종류, 주요 수치 설명
-5. 각 청크의 images[].description에 설명을 채워 Write로 저장
-6. 로그 저장 — 처리한 이미지 목록, 각 description 요약을 로그 파일에 Write로 저장
+먼저 에이전트 프롬프트를 Read로 읽으세요:
+$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/prompts/agent.md
 
-결과 보고는 반드시 아래 한 줄 형식으로만 반환하세요:
-DESCRIBED [파일명] 이미지N개
-또는
-SKIP [파일명] 이미지없음
-```
-
-### Stage 2: 검증 에이전트
-
-Stage 1 (또는 Stage 1.5) 완료 후 별도 에이전트로 실행합니다:
-
-```
-생성된 chunks.json을 검증하고, 문제가 있으면 수정하세요.
-
-PDF: $PDF_DIR/[파일명].pdf
-청크 JSON: $MD_DIR/[파일명].chunks.json
-청크 스키마: $CLAUDE_PLUGIN_DIR/skills/pdf-chunker/chunk-schema.md
-로그 파일: $LOG_DIR/[파일명].stage2.log
-
-작업:
-1. 스키마/구조 자동 검증:
-   Bash: python3 "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/scripts/verify_chunks.py" "$MD_DIR/[파일명].chunks.json" -v
-2. 스키마/구조 에러가 있으면:
-   a. chunks.json을 Read로 읽고, 누락 필드 추가/수정 후 Write로 저장
-   b. chunk_seq/split 정합성 수정
-   c. 수정 후 다시 verify_chunks.py 실행하여 재검증
-3. 커버리지 확인 (에이전트 직접 수행):
-   a. PDF를 Read로 읽기
-   b. chunks.json의 text들과 대조하여, PDF 원문에 있는데 chunks에 누락된 텍스트가 없는지 확인
-   c. 누락이 있으면 해당 청크의 text에 추가하고 Write로 저장
-4. 모든 검증 통과 시:
-   Bash: bash "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/scripts/queue_manager.sh" complete "[파일명]"
-   → OK 반환
-5. 수정 불가능한 에러 시:
-   Bash: bash "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/scripts/queue_manager.sh" fail "[파일명]" "에러 설명"
-   → FAIL 반환
-6. 로그 저장 — 아래 내용을 로그 파일에 Write로 저장:
-   - verify_chunks.py 실행 결과 (에러/경고 목록)
-   - 수정한 항목 목록 (수정 전→후)
-   - 커버리지 확인 결과 (누락 텍스트 유무)
-   - 최종 결과 (OK/FAIL)
-
-결과 보고는 반드시 아래 한 줄 형식으로만 반환하세요:
-OK [파일명] 청크N개
-또는
-FAIL [파일명] 에러사유
+위 프롬프트의 지시에 따라 각 Stage 프롬프트를 순서대로 Read로 읽고 실행하세요.
+프롬프트 내 {{PLUGIN_DIR}}, {{PDF_DIR}}, {{MD_DIR}} 등의 플레이스홀더는 위 설정값으로 대체하세요.
 ```
 
 ### 에이전트 실행 흐름
 
 각 작업에 대해:
 1. 로그 디렉토리 확인: `mkdir -p "$LOG_DIR"` (첫 작업 시 1회)
-2. Stage 1 에이전트를 **백그라운드**로 실행
-3. Stage 1 완료 알림 수신 시:
-   - `FAIL`이면 → 로그 파일(`$LOG_DIR/[파일명].stage1.log`)을 Read로 읽어 에러 원인 확인 → fail 처리 → 다음 작업 claim
-   - `GENERATED`이면:
-     - `IMAGE_DESCRIPTION=true`이고 이미지가 있으면 → Stage 1.5 실행
-     - 그 외 → Stage 2 실행
-4. Stage 1.5 완료 알림 수신 시:
-   - → Stage 2 에이전트를 **백그라운드**로 실행
-5. Stage 2 완료 알림 수신 시:
-   - `OK`이면 → 다음 작업 claim + Stage 1 실행
-   - `FAIL`이면 → 로그 파일(`$LOG_DIR/[파일명].stage2.log`)을 Read로 읽어 에러 원인 확인 → 다음 작업 claim + Stage 1 실행
+2. 통합 에이전트를 **백그라운드**로 실행 (Stage 1→2→3 전 과정 처리)
+3. 에이전트 완료 알림 수신 시:
+   - `OK`이면 → 다음 작업 claim + 에이전트 실행
+   - `FAIL`이면 → 로그 파일(`$LOG_DIR/[파일명].log`)을 Read로 읽어 에러 원인 확인 → 다음 작업 claim + 에이전트 실행
 
-**중요**: Stage 2 에이전트가 `complete` 또는 `fail`을 호출해야 작업 상태가 즉시 업데이트됩니다.
-Stage 1이 실패하면 코디네이터가 직접 `fail`을 호출합니다.
-로그 파일은 `$LOG_DIR/`에 스테이지별로 저장되며, FAIL 시에만 코디네이터가 로그를 확인합니다.
+**중요**: 에이전트가 `complete` 또는 `fail`을 호출해야 작업 상태가 즉시 업데이트됩니다.
+로그 파일은 `$LOG_DIR/`에 저장되며, FAIL 시에만 코디네이터가 로그를 확인합니다.
 
 ---
 
@@ -315,7 +232,7 @@ Stage 1이 실패하면 코디네이터가 직접 `fail`을 호출합니다.
 
 ## 필요 권한
 
-settings.local.json에 다음 권한이 필요합니다:
+settings.local.json에 다음 권한이 필요합니다 (`/pdf-chunker:setup`으로 자동 설정):
 
 ```json
 {
@@ -327,7 +244,10 @@ settings.local.json에 다음 권한이 필요합니다:
       "Edit(*)",
       "Task(*)",
       "Glob(*)",
-      "Grep(*)"
+      "Grep(*)",
+      "mcp__codex-agent__codex",
+      "mcp__codex-agent__codex-reply",
+      "mcp__gemini__ask-gemini"
     ]
   }
 }

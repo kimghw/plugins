@@ -255,6 +255,12 @@ class ChunkVerifier:
                             error="spans는 비어있지 않은 배열이어야 함"))
                     else:
                         for i, span in enumerate(spans):
+                            if not isinstance(span, dict):
+                                report.schema_errors.append(SchemaError(
+                                    chunk_seq=seq, chunk_id=cid,
+                                    field=f"locators.spans[{i}]",
+                                    error=f"객체여야 하지만 {type(span).__name__} 타입임"))
+                                continue
                             for sf in REQUIRED_LOCATOR_SPAN_FIELDS:
                                 if sf not in span:
                                     report.schema_errors.append(SchemaError(
@@ -310,6 +316,12 @@ class ChunkVerifier:
             refs = chunk.get("references", [])
             if isinstance(refs, list):
                 for i, ref in enumerate(refs):
+                    if not isinstance(ref, dict):
+                        report.schema_errors.append(SchemaError(
+                            chunk_seq=seq, chunk_id=cid,
+                            field=f"references[{i}]",
+                            error=f"객체여야 하지만 {type(ref).__name__} 타입임"))
+                        continue
                     for rf in REQUIRED_REFERENCE_FIELDS:
                         if rf not in ref:
                             report.schema_errors.append(SchemaError(
@@ -361,6 +373,35 @@ class ChunkVerifier:
                         chunk_seq=seq, chunk_id=cid, field="keywords",
                         error="키워드가 비어있음", severity="warning"))
 
+            # ontology_keywords 검증
+            ok = chunk.get("ontology_keywords")
+            if ok is not None:
+                if not isinstance(ok, list):
+                    report.schema_errors.append(SchemaError(
+                        chunk_seq=seq, chunk_id=cid, field="ontology_keywords",
+                        error="배열이어야 함", severity="warning"))
+                else:
+                    valid_types = {"ship_type", "structural_member", "equipment",
+                                   "material", "inspection", "load_condition", "parameter"}
+                    for j, item in enumerate(ok):
+                        if not isinstance(item, dict):
+                            report.schema_errors.append(SchemaError(
+                                chunk_seq=seq, chunk_id=cid,
+                                field=f"ontology_keywords[{j}]",
+                                error="객체여야 함", severity="warning"))
+                            continue
+                        if "mention" not in item or "type" not in item:
+                            report.schema_errors.append(SchemaError(
+                                chunk_seq=seq, chunk_id=cid,
+                                field=f"ontology_keywords[{j}]",
+                                error="mention과 type 필드 필요", severity="warning"))
+                        elif item.get("type") not in valid_types:
+                            report.schema_errors.append(SchemaError(
+                                chunk_seq=seq, chunk_id=cid,
+                                field=f"ontology_keywords[{j}]",
+                                error=f"유효하지 않은 type: {item.get('type')} (허용: {', '.join(sorted(valid_types))})",
+                                severity="warning"))
+
             # text는 비어있지 않은 문자열
             text = chunk.get("text")
             if text is not None:
@@ -384,6 +425,12 @@ class ChunkVerifier:
                         error="배열 타입이어야 함", severity="warning"))
                 else:
                     for i, ent in enumerate(de):
+                        if not isinstance(ent, dict):
+                            report.schema_errors.append(SchemaError(
+                                chunk_seq=seq, chunk_id=cid,
+                                field=f"domain_entities[{i}]",
+                                error=f"객체여야 하지만 {type(ent).__name__} 타입임", severity="warning"))
+                            continue
                         for req_f in ["mention", "canonical", "type"]:
                             if req_f not in ent:
                                 report.schema_errors.append(SchemaError(
@@ -448,6 +495,12 @@ class ChunkVerifier:
                         error="배열 타입이어야 함 (빈 배열 [] 또는 수식 목록)"))
                 else:
                     for i, eq in enumerate(eqs):
+                        if not isinstance(eq, dict):
+                            report.schema_errors.append(SchemaError(
+                                chunk_seq=seq, chunk_id=cid,
+                                field=f"equations[{i}]",
+                                error=f"객체여야 하지만 {type(eq).__name__} 타입임"))
+                            continue
                         for req_f in ["name", "symbol", "expression"]:
                             if req_f not in eq:
                                 report.schema_errors.append(SchemaError(
@@ -607,11 +660,11 @@ class ChunkVerifier:
 
             raw = m.group(0).strip()
 
-            # 앞뒤 컨텍스트 단어 추출 (각 최대 2개)
+            # 앞뒤 컨텍스트 단어 추출 (각 최대 2개, 소수점 포함)
             before_text = text[:m.start()]
             after_text = text[m.end():]
-            words_before = re.findall(r'[가-힣a-zA-Z0-9]+', before_text)
-            words_after = re.findall(r'[가-힣a-zA-Z0-9]+', after_text)
+            words_before = re.findall(r'[가-힣a-zA-Z0-9.]+', before_text)
+            words_after = re.findall(r'[가-힣a-zA-Z0-9.]+', after_text)
             ctx_before = words_before[-2:] if len(words_before) >= 2 else words_before
             ctx_after = words_after[:2] if len(words_after) >= 2 else words_after
 
@@ -773,7 +826,7 @@ class ChunkVerifier:
         all_chunks_raw = " ".join(all_text_parts)
 
         # 3. 청크 텍스트에서도 수치 패턴의 검색 대상 구성
-        #    단어 + 숫자를 모두 이어 붙인 문자열 (기존 커버리지와 동일 원리)
+        #    단어 + 숫자 + 소수점을 모두 이어 붙인 문자열 (search_key와 동일 토큰 규칙 적용)
         chunks_words = re.findall(r'[가-힣a-zA-Z0-9.]+', all_chunks_raw)
         chunks_joined = "".join(chunks_words)
 

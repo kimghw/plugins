@@ -32,18 +32,23 @@ QUEUE_PROCESSING="$QUEUE_DIR/processing"
 QUEUE_DONE="$QUEUE_DIR/done"
 QUEUE_FAILED="$QUEUE_DIR/failed"
 
-# 레거시 큐 파일 (마이그레이션용)
-QUEUE_FILE_LEGACY="$PROJECT_DIR/.claude/pdf-queue.txt"
-
 # 인스턴스 식별자 (세션 고정 UUID)
 # config.sh를 source할 때마다 PID가 바뀌는 문제 방지
 # 세션당 한 번 생성되어 /tmp에 저장됨
-_INSTANCE_ID_FILE="/tmp/.claude-queue-instance-${CLAUDE_SESSION_ID:-$$}"
-if [ -f "$_INSTANCE_ID_FILE" ]; then
-    INSTANCE_ID="$(cat "$_INSTANCE_ID_FILE")"
+#
+# 우선순위: INSTANCE_ID 환경변수 > 파일 캐시 > 신규 생성
+# 서브 에이전트에서는 코디네이터가 INSTANCE_ID를 환경변수로 전달해야 함
+if [ -n "${INSTANCE_ID:-}" ]; then
+    # 이미 환경변수로 설정됨 (서브 에이전트에서 전달받은 경우)
+    :
 else
-    INSTANCE_ID="$(hostname -s)_$(date +%s)_$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-    echo "$INSTANCE_ID" > "$_INSTANCE_ID_FILE"
+    _INSTANCE_ID_FILE="/tmp/.claude-queue-instance-${CLAUDE_SESSION_ID:-default}"
+    if [ -f "$_INSTANCE_ID_FILE" ]; then
+        INSTANCE_ID="$(cat "$_INSTANCE_ID_FILE")"
+    else
+        INSTANCE_ID="$(hostname -s)_$(date +%s)_$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+        echo "$INSTANCE_ID" > "$_INSTANCE_ID_FILE"
+    fi
 fi
 
 # stale 작업 기준 (초, 기본 30분)

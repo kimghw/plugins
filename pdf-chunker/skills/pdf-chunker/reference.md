@@ -12,17 +12,27 @@ plugins/pdf-chunker/
 │   └── pdf-chunker/
 │       ├── SKILL.md             # 스킬 정의
 │       ├── config.sh            # 경로 설정 (★ 새 프로젝트에서 이것만 수정)
+│       ├── chunk-schema.md      # 청크 JSON 스키마 정의
 │       ├── reference.md         # 이 파일
+│       ├── prompts/             # 서브에이전트 프롬프트 (Stage별 분리)
+│       │   ├── agent.md          # 메인 프롬프트 (실행 순서, stage 파일 경로)
+│       │   ├── stage1-structure.md  # Stage 1: PDF→chunks.json 구조화
+│       │   ├── stage1.5-image.md    # Stage 1.5: 이미지 분석 (선택)
+│       │   ├── stage2-codex.md      # Stage 2: Codex MCP 검증
+│       │   ├── stage2-gemini.md     # Stage 2: Gemini MCP 검증
+│       │   └── stage3-review.md     # Stage 3: 검증 결과 반영 + verify
 │       └── scripts/
 │           ├── split_pdf.py      # PDF 분할 (11페이지 이상 → 10페이지씩)
 │           ├── extract_images.py  # 이미지 추출 (조각 합침, 벡터 포함)
-│           ├── verify_markdown.py # 검증 스크립트
-│           └── queue_manager.sh   # 공유 큐 관리
+│           ├── verify_chunks.py   # 청크 JSON 통합 검증
+│           ├── verify_markdown.py # 검증 스크립트 (레거시)
+│           ├── queue_manager.sh   # 공유 큐 관리
+│           └── setup_mcp.sh       # MCP 서버 자동 설정 (Codex/Gemini)
 ├── hooks/
 │   └── hooks.json               # 후크 선언 (현재 비활성)
 └── commands/
-    ├── convert.md               # 변환 커맨드
-    ├── setup.md                 # 초기 설정 커맨드
+    ├── convert.md               # 변환 커맨드 (코디네이터)
+    ├── setup.md                 # 초기 설정 커맨드 (경로 + MCP + 다사용자)
     └── cowork.md                # 협업 설정 커맨드
 ```
 

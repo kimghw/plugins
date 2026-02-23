@@ -99,6 +99,10 @@ def main():
 
     args = parser.parse_args()
 
+    if args.chunk <= 0:
+        print(f"Error: --chunk 값은 양의 정수여야 합니다: {args.chunk}", file=sys.stderr)
+        sys.exit(1)
+
     # 입력이 폴더인지 파일인지 판단
     if os.path.isdir(args.input):
         pdf_files = sorted(glob.glob(os.path.join(args.input, "*.pdf")))

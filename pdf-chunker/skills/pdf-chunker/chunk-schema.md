@@ -464,6 +464,37 @@ split 객체 존재 여부로 분할 판단. null이면 미분할. section_id가
 |------|------|------|
 | `keywords` | string[5] | 도메인 키워드 5개. LLM 생성 |
 
+### Ontology 키워드
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `ontology_keywords` | array | 청크 text에서 추출한 도메인 ontology 키워드. Stage 2(Codex/Gemini 검증)에서 생성. 없으면 `[]` |
+
+```jsonc
+"ontology_keywords": [
+  {"mention": "횡격벽", "type": "structural_member"},
+  {"mention": "전단력", "type": "parameter"},
+  {"mention": "벌크선", "type": "ship_type"}
+]
+```
+
+**entity type 값** (DomainOntology 참조):
+
+| 값 | 설명 | 예시 |
+|----|------|------|
+| `ship_type` | 선종 | 벌크선, LNG선, 컨테이너선 |
+| `structural_member` | 구조 부재 | 횡격벽, 종통재, 외판, 이중저 |
+| `equipment` | 장비/시스템 | 벤트장치, 가스탐지기, 하역장치 |
+| `material` | 재료 | 고장력강, 알루미늄 합금, FRP |
+| `inspection` | 검사/시험 | 비파괴검사, 수밀시험, 두께측정 |
+| `load_condition` | 하중/조건 | 정수중 굽힘모멘트, 파랑하중, 좌굴 |
+| `parameter` | 설계 파라미터 | 전단력, 단면계수, 허용응력 |
+
+- `mention`: 청크 text에 나타난 원문 표현 그대로
+- `type`: 위 7가지 중 하나
+- 개수 제한 없음 (해당 청크에서 발견된 모든 도메인 엔티티)
+- Stage 1에서는 빈 배열 `[]`, Stage 2에서 채움
+
 ### KG 확장 필드 (후처리)
 
 아래 필드들은 **청킹 단계(Stage 1)에서 생성하지 않는다.** 별도 후처리 파이프라인(NER, 관계 추출, 조건 파싱)에서 채운다.
