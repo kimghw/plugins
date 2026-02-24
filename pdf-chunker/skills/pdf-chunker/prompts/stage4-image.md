@@ -1,4 +1,4 @@
-# Stage 1.5: 이미지 분석
+# Stage 4: 이미지 분석
 
 이미지가 있고 IMAGE_DESCRIPTION=true인 경우에만 실행합니다.
 

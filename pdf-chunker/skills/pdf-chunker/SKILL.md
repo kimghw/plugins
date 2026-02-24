@@ -154,6 +154,7 @@ bash "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/scripts/queue_manager.sh" <command>
    - **Stage 1**: PDF 읽기 → 청크 JSON 생성 → 이미지 추출
    - **Stage 2**: Codex/Gemini MCP로 MD 변환 + 검증 + ontology 키워드 추출
    - **Stage 3**: 검증 결과 반영 → verify_chunks.py → complete/fail
+   - **Stage 4**: 이미지 분석 (선택) → images[].description 채움
 4. 에이전트 완료 시 다음 작업 할당. 총 처리 개수에 도달할 때까지 반복
 
 ### stale 복구
@@ -167,7 +168,7 @@ bash "$CLAUDE_PLUGIN_DIR/skills/pdf-chunker/scripts/queue_manager.sh" <command>
 
 - [agent.md](prompts/agent.md): 서브에이전트 메인 프롬프트 (실행 순서, stage 파일 경로, 결과 보고 형식)
 - [stage1-structure.md](prompts/stage1-structure.md): Stage 1 — PDF→chunks.json 구조화 규칙
-- [stage1.5-image.md](prompts/stage1.5-image.md): Stage 1.5 — 이미지 분석 (선택)
+- [stage4-image.md](prompts/stage4-image.md): Stage 4 — 이미지 분석 (선택, Stage 3 이후)
 - [stage2-codex.md](prompts/stage2-codex.md): Stage 2 — Codex MCP 검증 (Step 1 MD변환 + Step 2 검증+ontology)
 - [stage2-gemini.md](prompts/stage2-gemini.md): Stage 2 — Gemini MCP 검증
 - [stage3-review.md](prompts/stage3-review.md): Stage 3 — 검증 결과 반영 + verify + complete/fail

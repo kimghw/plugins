@@ -11,7 +11,7 @@ prompt: "@{{PDF_DIR}}/{{PDF_FILE}} 이 PDF를 읽고 충실한 마크다운으�
 model: "gemini-3-pro-preview"
 ```
 
-→ 결과를 `{{MD_DIR}}/[파일명].review.md`에 Write로 저장
+→ 결과를 `{{MD_DIR}}/[파일명].review.gemini.md`에 Write로 저장
 
 ## Step 2 — mcp__gemini__ask-gemini 호출
 
@@ -37,11 +37,11 @@ JSON 형식:
 }
 ```
 
-→ 결과를 `{{MD_DIR}}/[파일명].review.json`에 Write로 저장
+→ 결과를 `{{MD_DIR}}/[파일명].review.gemini.json`에 Write로 저장
 
 ## Gemini 실패 시
 
 Gemini MCP 호출이 실패하면:
-- review.json 없이 Stage 3으로 이동
+- review.gemini.json 없이 Stage 3으로 이동
 - Stage 3에서 PDF 직접 대조 방식으로 검증 진행
 - 로그에 실패 사유 기록

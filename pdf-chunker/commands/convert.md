@@ -83,10 +83,10 @@ bash "$QUEUE_SCRIPT" status
 - options: 전체(대기 중인 모든 PDF)(권장), 50개, 10개
 - 사용자가 Other로 특정 범위(예: "0101~0200만") 또는 숫자를 지정할 수 있음
 
-질문 3 — **이미지 분석 (Stage 1.5)**
+질문 3 — **이미지 분석 (Stage 4)**
 - header: "이미지 분석"
 - options: 끄기(권장), 켜기
-- 켜면 `IMAGE_DESCRIPTION=true` 설정 → Stage 1.5 실행
+- 켜면 `IMAGE_DESCRIPTION=true` 설정 → Stage 4 실행 (Stage 3 이후)
 
 질문 4 — **검증 모델 (Stage 2)**
 - header: "검증 모델"

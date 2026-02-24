@@ -9,7 +9,7 @@
    - 50토큰 미만은 chunk_type: "micro", 표는 통째 chunk_type: "table"
    - 2000토큰 초과 표는 table_oversized: true
    - 각 청크에: section_id, section_path, context_prefix, images[], tables[], references[], keywords(5개)
-   - images[].description: 빈 문자열 ""로 설정 (Stage 1.5에서 채움)
+   - images[].description: 빈 문자열 ""로 설정 (Stage 4에서 채움)
    - references에 target_norm (정규화 구조) 포함. null 키 금지 — 해당 키만 포함. external이면 빈 객체 {}
    - references에 relation 필드 추가: 초기값 null (후처리에서 채움)
    - text에는 본문만 (헤더 반복 금지), 원문 그대로 — 요약/생략 금지

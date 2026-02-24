@@ -17,7 +17,7 @@ plugins/pdf-chunker/
 │       ├── prompts/             # 서브에이전트 프롬프트 (Stage별 분리)
 │       │   ├── agent.md          # 메인 프롬프트 (실행 순서, stage 파일 경로)
 │       │   ├── stage1-structure.md  # Stage 1: PDF→chunks.json 구조화
-│       │   ├── stage1.5-image.md    # Stage 1.5: 이미지 분석 (선택)
+│       │   ├── stage4-image.md       # Stage 4: 이미지 분석 (선택, Stage 3 이후)
 │       │   ├── stage2-codex.md      # Stage 2: Codex MCP 검증
 │       │   ├── stage2-gemini.md     # Stage 2: Gemini MCP 검증
 │       │   └── stage3-review.md     # Stage 3: 검증 결과 반영 + verify

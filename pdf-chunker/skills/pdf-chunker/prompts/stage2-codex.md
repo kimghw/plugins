@@ -7,7 +7,7 @@
 PDF를 마크다운으로 변환합니다.
 
 ```
-prompt: "이 PDF 파일을 읽고 충실한 마크다운으로 변환하세요. 표는 마크다운 표, 수식은 LaTeX, 이미지 참조는 ![설명](경로) 유지. 요약/생략 없이 원문 전체를 변환하세요. 변환된 마크다운을 {{MD_DIR}}/[파일명].review.md 파일로 저장하세요."
+prompt: "이 PDF 파일을 읽고 충실한 마크다운으로 변환하세요. 표는 마크다운 표, 수식은 LaTeX, 이미지 참조는 ![설명](경로) 유지. 요약/생략 없이 원문 전체를 변환하세요. 변환된 마크다운을 {{MD_DIR}}/[파일명].review.codex.md 파일로 저장하세요."
 cwd: "{{PDF_DIR}}"
 model: "gpt-5.3-codex"
 sandbox: "workspace-write"
@@ -31,7 +31,7 @@ B. 환각 체크: chunks.json text에 있는데 마크다운에 없는 내용 �
 C. ontology 키워드: 각 청크 text에서 7가지 entity type 키워드 추출 → ontology_keywords
    entity types: ship_type, structural_member, equipment, material, inspection, load_condition, parameter
 
-결과를 아래 JSON 형식으로 {{MD_DIR}}/[파일명].review.json 파일에 저장하세요:
+결과를 아래 JSON 형식으로 {{MD_DIR}}/[파일명].review.codex.json 파일에 저장하세요:
 {
   \"coverage_issues\": [{\"chunk_seq\": N, \"missing_text\": \"누락 텍스트\", \"location\": \"MD 내 위치\"}],
   \"hallucination_suspects\": [{\"chunk_seq\": N, \"suspect_text\": \"의심 텍스트\", \"reason\": \"사유\"}],
@@ -43,6 +43,6 @@ C. ontology 키워드: 각 청크 text에서 7가지 entity type 키워드 추�
 ## Codex 실패 시
 
 Codex MCP 호출이 실패하면(권한 거부, 타임아웃 등):
-- review.json 없이 Stage 3으로 이동
+- review.codex.json 없이 Stage 3으로 이동
 - Stage 3에서 PDF 직접 대조 방식으로 검증 진행
 - 로그에 실패 사유 기록

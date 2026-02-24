@@ -124,7 +124,10 @@ check_codex_token() {
 import json, sys
 try:
     data = json.load(open(sys.argv[1]))
-    if 'access_token' in data and len(data['access_token']) > 10:
+    tokens = data.get('tokens', {})
+    if not tokens:
+        tokens = data
+    if 'access_token' in tokens and len(tokens['access_token']) > 10:
         sys.exit(0)
     sys.exit(1)
 except Exception:

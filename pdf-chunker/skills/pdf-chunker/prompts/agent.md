@@ -28,13 +28,7 @@ Read: `{{PLUGIN_DIR}}/skills/pdf-chunker/prompts/stage1-structure.md`
 
 PDF를 읽고 청크 JSON을 생성합니다.
 
-### 2. Stage 1.5 — 이미지 분석 (선택)
-
-`{{IMAGE_DESCRIPTION}}`이 `true`이고 chunks.json에 이미지가 있을 때만 실행합니다.
-
-Read: `{{PLUGIN_DIR}}/skills/pdf-chunker/prompts/stage1.5-image.md`
-
-### 3. Stage 2 — 검증 + ontology 키워드 추출 (선택)
+### 2. Stage 2 — 검증 + ontology 키워드 추출 (선택)
 
 `{{REVIEW_MODEL}}`이 `off`이면 이 단계를 건너뜁니다.
 
@@ -44,9 +38,16 @@ Read: `{{PLUGIN_DIR}}/skills/pdf-chunker/prompts/stage1.5-image.md`
 - `{{REVIEW_MODEL}}`이 `gemini`이면:
   Read: `{{PLUGIN_DIR}}/skills/pdf-chunker/prompts/stage2-gemini.md`
 
-### 4. Stage 3 — 검증 결과 반영 + 최종 검증
+### 3. Stage 3 — 검증 결과 반영 + 최종 검증
 
 Read: `{{PLUGIN_DIR}}/skills/pdf-chunker/prompts/stage3-review.md`
+
+### 4. Stage 4 — 이미지 분석 (선택)
+
+`{{IMAGE_DESCRIPTION}}`이 `true`이고 chunks.json에 이미지가 있을 때만 실행합니다.
+Stage 3에서 chunks.json이 확정된 후 실행하므로 재작업이 없습니다.
+
+Read: `{{PLUGIN_DIR}}/skills/pdf-chunker/prompts/stage4-image.md`
 
 ## 결과 보고
 
